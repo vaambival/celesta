@@ -371,7 +371,7 @@ public class ScoreTest {
     }
 
     @Test
-    public void fknameTest() throws ParseException {
+    public void fkNameTest() throws ParseException {
         AbstractScore s = new AbstractScore.ScoreBuilder(CelestaSqlTestScore.class)
                 .path(TEST_SCORE_PATH)
                 .build();

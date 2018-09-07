@@ -167,6 +167,13 @@ public abstract class AbstractScore {
                 throw new ParseException(errorScript.toString());
         }
 
+        this.grains.values().forEach(this::resolveReferences);
+    }
+
+    private void resolveReferences(Grain g) {
+        g.getTables().values().forEach(table -> {
+            table.resolveReferences();
+        });
     }
 
     void parseGrain(String grainName) throws ParseException {

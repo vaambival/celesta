@@ -8,6 +8,7 @@ import java.util.Properties;
 import static org.junit.jupiter.api.Assertions.*;
 
 import org.junit.jupiter.api.Test;
+import ru.curs.celesta.exception.CelestaParseException;
 
 public class GrainModelTest {
 
