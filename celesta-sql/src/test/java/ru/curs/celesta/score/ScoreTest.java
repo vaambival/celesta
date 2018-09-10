@@ -40,8 +40,8 @@ public class ScoreTest {
         int o1 = g1.getDependencyOrder();
         int o2 = g2.getDependencyOrder();
         int o3 = g3.getDependencyOrder();
+        assertTrue(o3 < o1);
         assertTrue(o1 < o2);
-        assertTrue(o2 < o3);
 
         assertAll(
                 () -> assertEquals(1, g1.getGrainParts().size()),
