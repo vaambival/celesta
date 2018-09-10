@@ -37,12 +37,6 @@ public class ScoreTest {
 
         Grain g3 = s.getGrain("grain3");
 
-        int o1 = g1.getDependencyOrder();
-        int o2 = g2.getDependencyOrder();
-        int o3 = g3.getDependencyOrder();
-        assertTrue(o3 < o1);
-        assertTrue(o1 < o2);
-
         assertAll(
                 () -> assertEquals(1, g1.getGrainParts().size()),
                 () -> assertTrue(
@@ -79,6 +73,7 @@ public class ScoreTest {
         Grain sys = s.getGrain("celestaSql");
         a = sys.getElement("grains", Table.class);
         assertEquals("grains", a.getName());
+        int o1 = g1.getDependencyOrder();
         assertTrue(sys.getDependencyOrder() < o1);
         IntegerColumn c = (IntegerColumn) a.getColumns().get("state");
         assertEquals(3, c.getDefaultValue().intValue());
