@@ -40,9 +40,11 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 
 import ru.curs.celesta.CelestaException;
+import ru.curs.celesta.exception.CelestaParseException;
 import ru.curs.celesta.score.discovery.DefaultScoreDiscovery;
 import ru.curs.celesta.score.discovery.ScoreDiscovery;
 import ru.curs.celesta.score.validator.IdentifierParser;
@@ -167,11 +169,69 @@ public abstract class AbstractScore {
                 throw new ParseException(errorScript.toString());
         }
 
-        this.grains.values().forEach(this::resolveReferences);
+
+        for (Grain g : this.grains.values()) {
+            this.resolveReferences(g);
+        }
     }
 
-    private void resolveReferences(Grain g) {
-        g.getTables().values().forEach(Table::resolveReferences);
+    private void resolveReferences(Grain g) throws ParseException {
+        for (Table t : g.getElements(Table.class).values()) {
+            GrainElementReference tAsReference = new GrainElementReference(
+                    g.getName(), t.getName(), Table.class, null
+            );
+            LinkedHashSet<GrainElementReference> referenceChain = new LinkedHashSet<>();
+            referenceChain.add(tAsReference);
+
+            if (hasCycleDependency(t.getReferences(), referenceChain)) {
+                List<GrainElementReference> cycleChain = new ArrayList<>(referenceChain);
+                cycleChain.add(cycleChain.get(0));
+                throw new CelestaParseException(
+                        "Cycle reference detected for %s.%s on chain: %s",
+                        g.getName(), t.getName(),
+                        cycleChain.stream()
+                        .map((r) -> String.format("%s.%s", r.getGrainName(), r.getName()))
+                        .collect(Collectors.joining(" -> "))
+                );
+            }
+
+            t.resolveReferences();
+        }
+    }
+
+    private boolean hasCycleDependency(List<GrainElementReference> references,
+                                       LinkedHashSet<GrainElementReference> referenceChain)
+            throws ParseException {
+        for (GrainElementReference grainElementReference : references) {
+            if (referenceChain.contains(grainElementReference)) {
+                // Prepare real cycle chain
+                List<GrainElementReference> listChain = new ArrayList<>(referenceChain);
+                listChain = listChain.subList(listChain.indexOf(grainElementReference), listChain.size());
+                referenceChain.clear();
+                referenceChain.addAll(listChain);
+
+                return true;
+            }
+
+            Grain g = getGrain(grainElementReference.getGrainName());
+            GrainElement ge = g.getElement(
+                    grainElementReference.getName(),
+                    grainElementReference.getGrainElementClass()
+            );
+
+
+            LinkedHashSet<GrainElementReference> newReferenceChain = new LinkedHashSet<>(referenceChain);
+            newReferenceChain.add(grainElementReference);
+
+            boolean nestedResult = this.hasCycleDependency(ge.getReferences(), newReferenceChain);
+
+            if (nestedResult) {
+                referenceChain.addAll(newReferenceChain);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     void parseGrain(String grainName) throws ParseException {

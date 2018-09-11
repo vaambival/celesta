@@ -72,7 +72,7 @@ public abstract class GrainElement extends NamedElement {
 
         if (grainElement != null && grainElement.references.contains(thisAsReference)) {
             throw new CelestaException(
-                    "Cycle reference detected between $s.$s and $s.$s",
+                    "Cycle reference detected between %s.%s and %s.%s",
                     this.getGrainPart().getGrain().getName(), this.getName(),
                     reference.getGrainName(), reference.getName()
             );
@@ -85,5 +85,9 @@ public abstract class GrainElement extends NamedElement {
         this.references.stream()
                 .filter(GrainElementReference::isNotResolved)
                 .forEach(GrainElementReference::resolve);
+    }
+
+    List<GrainElementReference> getReferences() {
+        return references;
     }
 }
