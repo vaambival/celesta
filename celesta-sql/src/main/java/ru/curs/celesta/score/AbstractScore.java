@@ -170,69 +170,14 @@ public abstract class AbstractScore {
         }
 
 
-        for (Grain g : this.grains.values()) {
-            this.resolveReferences(g);
+        // References resolving
+        ReferenceResolver referenceResolver = new ReferenceResolver(this);
+        for (String grainName : grainNameToGrainParts.keySet()) {
+            Grain g = this.getGrain(grainName);
+            referenceResolver.resolveReferences(g);
         }
     }
 
-    private void resolveReferences(Grain g) throws ParseException {
-        for (Table t : g.getElements(Table.class).values()) {
-            GrainElementReference tAsReference = new GrainElementReference(
-                    g.getName(), t.getName(), Table.class, null
-            );
-            LinkedHashSet<GrainElementReference> referenceChain = new LinkedHashSet<>();
-            referenceChain.add(tAsReference);
-
-            if (hasCycleDependency(t.getReferences(), referenceChain)) {
-                List<GrainElementReference> cycleChain = new ArrayList<>(referenceChain);
-                cycleChain.add(cycleChain.get(0));
-                throw new CelestaParseException(
-                        "Cycle reference detected for %s.%s on chain: %s",
-                        g.getName(), t.getName(),
-                        cycleChain.stream()
-                        .map((r) -> String.format("%s.%s", r.getGrainName(), r.getName()))
-                        .collect(Collectors.joining(" -> "))
-                );
-            }
-
-            t.resolveReferences();
-        }
-    }
-
-    private boolean hasCycleDependency(List<GrainElementReference> references,
-                                       LinkedHashSet<GrainElementReference> referenceChain)
-            throws ParseException {
-        for (GrainElementReference grainElementReference : references) {
-            if (referenceChain.contains(grainElementReference)) {
-                // Prepare real cycle chain
-                List<GrainElementReference> listChain = new ArrayList<>(referenceChain);
-                listChain = listChain.subList(listChain.indexOf(grainElementReference), listChain.size());
-                referenceChain.clear();
-                referenceChain.addAll(listChain);
-
-                return true;
-            }
-
-            Grain g = getGrain(grainElementReference.getGrainName());
-            GrainElement ge = g.getElement(
-                    grainElementReference.getName(),
-                    grainElementReference.getGrainElementClass()
-            );
-
-
-            LinkedHashSet<GrainElementReference> newReferenceChain = new LinkedHashSet<>(referenceChain);
-            newReferenceChain.add(grainElementReference);
-
-            boolean nestedResult = this.hasCycleDependency(ge.getReferences(), newReferenceChain);
-
-            if (nestedResult) {
-                referenceChain.addAll(newReferenceChain);
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     void parseGrain(String grainName) throws ParseException {
         Grain g = grains.get(grainName);
@@ -262,12 +207,11 @@ public abstract class AbstractScore {
      * гранулы неизвестно, выводится исключение.
      *
      * @param name Имя гранулы.
-     * @throws ParseException Если имя гранулы неизвестно системе.
      */
-    public Grain getGrain(String name) throws ParseException {
+    public Grain getGrain(String name) {
         Grain result = grains.get(name);
         if (result == null) {
-            throw new ParseException(String.format("Unknown grain '%s'.", name));
+            throw new CelestaParseException("Unknown grain '%s'.", name);
         }
         return result;
     }
@@ -338,34 +282,27 @@ public abstract class AbstractScore {
     }
 
     private void initSystemGrain() {
-        ChecksumInputStream is = null;
-
         try {
             GrainPart grainPart = extractGrainInfo(null, true);
-            is = new ChecksumInputStream(getSysSchemaInputStream());
-            CelestaParser parser = new CelestaParser(is, "utf-8");
 
-            Grain result;
-            try {
-                result = parser.parseGrainPart(grainPart);
-            } catch (ParseException e) {
-                throw new CelestaException(e.getMessage());
+            try (InputStream is = getSysSchemaInputStream();
+                 ChecksumInputStream cis = new ChecksumInputStream(is))
+            {
+                CelestaParser parser = new CelestaParser(cis, "utf-8");
+
+                Grain result;
+                try {
+                    result = parser.parseGrainPart(grainPart);
+                } catch (ParseException e) {
+                    throw new CelestaException(e.getMessage());
+                }
+                result.setChecksum(cis.getCRC32());
+                result.setLength(cis.getCount());
+                result.finalizeParsing();
             }
-            result.setChecksum(is.getCRC32());
-            result.setLength(is.getCount());
-            result.finalizeParsing();
         } catch (Exception e) {
             throw new CelestaException(e);
-        } finally {
-            try {
-                if (is != null)
-                    is.close();
-            } catch (IOException e) {
-                // This should never happen, however.
-                is = null;
-            }
         }
-
     }
 
     private InputStream getSysSchemaInputStream() {

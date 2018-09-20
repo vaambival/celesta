@@ -3,10 +3,8 @@ package ru.curs.celesta.score.discovery.fk;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import ru.curs.celesta.CelestaException;
-import ru.curs.celesta.score.AbstractScore;
-import ru.curs.celesta.score.Grain;
-import ru.curs.celesta.score.ScoreUtil;
-import ru.curs.celesta.score.Table;
+import ru.curs.celesta.score.*;
+
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -115,14 +113,34 @@ public class FkDefaultScoreDiscoveryTest {
     @Test
     @DisplayName("Score parsing fails on implicit cycle")
     void testFailsOnImplicitCycle() {
-        assertThrows(
+        CelestaException e = assertThrows(
                 CelestaException.class,
                 () -> ScoreUtil.createCelestaSqlTestScore(
                         this.getClass(),
                         "implicit_cycle"
                 ));
-        //TODO:Проверка правильности сообщения исключения
+
+        String expectedMessage = String.format(
+                ReferenceResolver.CYCLE_REFERENCE_ERROR_MESSAGE_TEMPLATE,
+                String.join(" -> ", "test.a", "test.b", "test.c", "test.a")
+        );
+        assertEquals(expectedMessage, e.getMessage());
     }
 
-    //TODO:Более сложные тесты с циклическими ссылками, возникающими в процессе резолвинга
+    @Test
+    @DisplayName("Score parsing fails on implicit deep cycle")
+    void testFailsOnDeepImplicitCycle() {
+        CelestaException e = assertThrows(
+                CelestaException.class,
+                () -> ScoreUtil.createCelestaSqlTestScore(
+                        this.getClass(),
+                        "implicit_deep_cycle"
+                ));
+
+        String expectedMessage = String.format(
+                ReferenceResolver.CYCLE_REFERENCE_ERROR_MESSAGE_TEMPLATE,
+                String.join(" -> ", "schema1.b", "schema2.c", "schema1.d", "schema1.b")
+        );
+        assertEquals(expectedMessage, e.getMessage());
+    }
 }

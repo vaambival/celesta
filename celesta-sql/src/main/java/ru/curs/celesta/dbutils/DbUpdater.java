@@ -113,23 +113,72 @@ public abstract class DbUpdater<T extends ICallContext> {
 
             // Выполняем итерацию по гранулам.
             boolean success = true;
+
+
+            final Set<GrainElement> grainElementsToUpdateSet = new HashSet<>();
+            final Map<Grain, List<DbFkInfo>> grainToDbFkInfoList = new HashMap<>();
+
             for (Grain g : grains) {
-                // Запись о грануле есть?
                 GrainInfo gi = dbGrains.get(g.getName());
+
                 if (gi == null) {
                     insertGrainRec(g);
-                    success = updateGrain(g, connectionPool) & success;
                 } else {
-                    // Запись есть -- решение об апгрейде принимается на основе
-                    // версии и контрольной суммы.
-                    success = decideToUpgrade(g, gi, connectionPool) & success;
+                    // The record exists
+                    // The decision to upgrade is based on the version and checksum.
+                    if (!needToUpgrade(g, gi)) {
+                        // No need for update.
+                        continue;
+                    }
                 }
+
+                // Create a schema, if not already created.
+                schemaCursor.get(g.getName());
+                schemaCursor.setState(ISchemaCursor.UPGRADING);
+                schemaCursor.update();
+                connectionPool.commit(schemaCursor.callContext().getConn());
+
+                dbAdaptor.createSchemaIfNotExists(g.getName());
+
+                beforeGrainUpdating(g);
+
+                // Delete all views
+                dropAllViews(g);
+                // Delete all parameterized views
+                dropAllParameterizedViews(g);
+
+                // Выполняем удаление ненужных индексов, чтобы облегчить задачу
+                // обновления столбцов на таблицах.
+                dropOrphanedGrainIndices(g);
+
+                // Сбрасываем внешние ключи, более не включённые в метаданные
+                grainToDbFkInfoList.put(g, dropOrphanedGrainFKeys(g));
+
+
+                grainElementsToUpdateSet.addAll(g.getElements(SequenceElement.class).values());
+                grainElementsToUpdateSet.addAll(g.getElements(Table.class).values());
+                grainElementsToUpdateSet.addAll(g.getIndices().values());
+                grainElementsToUpdateSet.addAll(g.getElements(View.class).values());
+                grainElementsToUpdateSet.addAll(g.getElements(ParameterizedView.class).values());
+                grainElementsToUpdateSet.addAll(g.getElements(MaterializedView.class).values());
+
+                //TODO: дробим все на списки элементов и обновляем их в логичном порядке
             }
-            if (!success)
+
+            GrainElementUpdatingComparator comparator = new GrainElementUpdatingComparator(this.score);
+            final List<GrainElement> grainElementsToUpdate = new ArrayList<>(grainElementsToUpdateSet);
+            grainElementsToUpdate.sort(comparator);
+
+            for (GrainElement ge : grainElementsToUpdate) {
+                success =  updateGrainElement(ge) && success;
+            }
+
+            if (!success) {
                 throw new CelestaException(
                         "Not all %s were updated successfully, see %s.%s table data for details.",
                         getSchemasTableName(), sysSchemaName, getSchemasTableName()
                 );
+            }
         }
     }
 
@@ -164,12 +213,12 @@ public abstract class DbUpdater<T extends ICallContext> {
         schemaCursor.insert();
     }
 
-    boolean decideToUpgrade(Grain g, GrainInfo gi, ConnectionPool connectionPool) {
+    boolean needToUpgrade(Grain g, GrainInfo gi) {
         if (gi.lock)
-            return true;
+            return false;
 
         if (gi.recover)
-            return updateGrain(g, connectionPool);
+            return true;
 
         // Как соотносятся версии?
         switch (g.getVersion().compareTo(gi.version)) {
@@ -188,12 +237,11 @@ public abstract class DbUpdater<T extends ICallContext> {
                         g.getName(), g.getVersion().toString(), gi.version.toString());
             case GREATER:
                 // Версия выросла -- апгрейдим.
-                return updateGrain(g, connectionPool);
+                return true;
             case EQUALS:
                 // Версия не изменилась: апгрейдим лишь в том случае, если
                 // изменилась контрольная сумма.
-                if (gi.length != g.getLength() || gi.checksum != g.getChecksum())
-                    return updateGrain(g, connectionPool);
+                return (gi.length != g.getLength() || gi.checksum != g.getChecksum());
             default:
                 return true;
         }
@@ -233,6 +281,7 @@ public abstract class DbUpdater<T extends ICallContext> {
 
             Set<String> modifiedTablesMap = new HashSet<>();
 
+            //Обновляем все последовательности
             updateSequences(g);
 
             // Обновляем все таблицы.
@@ -294,6 +343,10 @@ public abstract class DbUpdater<T extends ICallContext> {
             connectionPool.commit(schemaCursor.callContext().getConn());
             return false;
         }
+    }
+
+    private boolean updateGrainElement(GrainElement ge) {
+
     }
 
     protected void beforeGrainUpdating(Grain g) { }

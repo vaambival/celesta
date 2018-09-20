@@ -149,13 +149,14 @@ public final class Grain extends NamedElement {
      *
      * @param name           Имя
      * @param classOfElement Класс элемента
-     * @throws ParseException Если элемент с таким именем и классом не найден в грануле.
      */
-    public <T extends GrainElement> T getElement(String name, Class<T> classOfElement) throws ParseException {
+    public <T extends GrainElement> T getElement(String name, Class<T> classOfElement) {
         T result = getElementsHolder(classOfElement).get(name);
         if (result == null)
-            throw new ParseException(
-                    String.format("%s '%s' not found in grain '%s'", classOfElement.getSimpleName(), name, getName()));
+            throw new CelestaException(
+                    "%s '%s' not found in grain '%s'",
+                    classOfElement.getSimpleName(), name, getName()
+            );
         return result;
     }
 

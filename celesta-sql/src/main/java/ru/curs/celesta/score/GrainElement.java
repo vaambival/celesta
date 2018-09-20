@@ -87,7 +87,7 @@ public abstract class GrainElement extends NamedElement {
                 .forEach(GrainElementReference::resolve);
     }
 
-    List<GrainElementReference> getReferences() {
+    public List<GrainElementReference> getReferences() {
         return references;
     }
 }
