@@ -34,7 +34,7 @@
  */
 
 /**Celesta system grain. Not for modification.*/
-create grain celesta version '1.13';
+create grain celesta version '2.0';
 
 /**Active grains list.
    {implements: [ru.curs.celesta.syscursors.ISchemaCursor]}*/
@@ -55,6 +55,23 @@ create table grains(
   /**comment (e. g. error message for the last failed auto-update)*/
   message text not null default '' 
 ) with no version check;
+
+/**Active grains list.
+   {implements: [ru.curs.celesta.syscursors.SchemaElementCursor]}*/
+create table grainElements(
+  /**grain prefix (id)*/
+  id varchar(30) not null ,
+  grainId varchar(30) not null,
+  type varchar(30) not null,
+  /**grain status
+   {option: [ready, upgrading, error]}*/
+  state int not null defa,
+  /**date and time of last grain status update*/
+  lastModified datetime not null default getdate(),
+  /**comment (e. g. error message for the last failed auto-update)*/
+  message text not null default ''
+) with no version check;
+
 
 /**Tables and views list.*/
 create table tables(

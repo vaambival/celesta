@@ -152,7 +152,7 @@ public abstract class DbUpdater<T extends ICallContext> {
                 dropOrphanedGrainIndices(g);
 
                 // Сбрасываем внешние ключи, более не включённые в метаданные
-                grainToDbFkInfoList.put(g, dropOrphanedGrainFKeys(g));
+                grainToDbFkInfoList.put(g, dropOrphanedGrainForeignKeysAndGetActual(g));
 
 
                 grainElementsToUpdateSet.addAll(g.getElements(SequenceElement.class).values());
@@ -169,8 +169,10 @@ public abstract class DbUpdater<T extends ICallContext> {
             final List<GrainElement> grainElementsToUpdate = new ArrayList<>(grainElementsToUpdateSet);
             grainElementsToUpdate.sort(comparator);
 
+            // TODO: Сначала нужно обновить последовательности, потом таблицы, потом индексы, потом внешние ключи,
+            //       а потом остальное
             for (GrainElement ge : grainElementsToUpdate) {
-                success =  updateGrainElement(ge) && success;
+                success =  updateGrainElement(ge, ) && success;
             }
 
             if (!success) {
@@ -277,7 +279,7 @@ public abstract class DbUpdater<T extends ICallContext> {
             dropOrphanedGrainIndices(g);
 
             // Сбрасываем внешние ключи, более не включённые в метаданные
-            List<DbFkInfo> dbFKeys = dropOrphanedGrainFKeys(g);
+            List<DbFkInfo> dbFKeys = dropOrphanedGrainForeignKeysAndGetActual(g);
 
             Set<String> modifiedTablesMap = new HashSet<>();
 
@@ -345,8 +347,42 @@ public abstract class DbUpdater<T extends ICallContext> {
         }
     }
 
-    private boolean updateGrainElement(GrainElement ge) {
+    private boolean updateGrainElement(GrainElement ge, Map<Grain, List<DbFkInfo>> dbFKeysMap, Set<Table> modifiedTablesSet) {
+        // TODO: Modify db metadata
+        try {
+            Grain g = ge.getGrain();
+            final Connection conn = schemaCursor.callContext().getConn();
+            // TODO: We need to create separated elementUpgrader
+            if (ge instanceof SequenceElement) {
+                SequenceElement s = (SequenceElement) ge;
+                updateSequence(s);
+            } else if (ge instanceof Table) {
+                Table t = (Table) ge;
+                List<DbFkInfo> dbFKeys = dbFKeysMap.get(g);
+                boolean tableIsUpdated = updateTable(t, dbFKeys);
 
+                if (tableIsUpdated) {
+                    modifiedTablesSet.add(t);
+                }
+
+                if (t.isAutoUpdate()) {
+                    for (ForeignKey fk : t.getForeignKeys()) {
+                        updateFk(fk, dbFKeys, conn);
+                    }
+                }
+            } else if (ge instanceof Index) {
+                // TODO: Optimization is needed
+                Map<String, DbIndexInfo> dbIndices = dbAdaptor.getIndices(conn, g);
+                final Index index = (Index) ge;
+                updateIndex(index, dbIndices);
+            }
+
+            // TODO: Modify db metadata
+            return true;
+        } catch (Exception e) {
+            // TODO: Modify db metadata
+            return false;
+        }
     }
 
     protected void beforeGrainUpdating(Grain g) { }
@@ -373,6 +409,18 @@ public abstract class DbUpdater<T extends ICallContext> {
             dbAdaptor.createParameterizedView(conn, pv);
     }
 
+    void updateSequence(SequenceElement s) {
+        Grain g = s.getGrain();
+        Connection conn = schemaCursor.callContext().getConn();
+        if (dbAdaptor.sequenceExists(conn, g.getName(), s.getName())) {
+            DbSequenceInfo sequenceInfo = dbAdaptor.getSequenceInfo(conn, s);
+            if (sequenceInfo.reflects(s))
+                dbAdaptor.alterSequence(conn, s);
+        } else {
+            dbAdaptor.createSequence(conn, s);
+        }
+    }
+
     void updateSequences(Grain g) {
         Connection conn = schemaCursor.callContext().getConn();
 
@@ -392,6 +440,25 @@ public abstract class DbUpdater<T extends ICallContext> {
         Connection conn = schemaCursor.callContext().getConn();
         for (String viewName : dbAdaptor.getParameterizedViewList(conn, g))
             dbAdaptor.dropParameterizedView(conn, g.getName(), viewName);
+    }
+
+    void updateFk(ForeignKey fk, List<DbFkInfo> dbFKeys, Connection conn) {
+        Grain g = fk.getParentTable().getGrain();
+        Optional<DbFkInfo> dbFkInfoOpt = dbFKeys.stream()
+                .filter(dbFkInfo -> dbFkInfo.getName().equals(fk.getConstraintName()))
+                .findFirst();
+
+        if (dbFkInfoOpt.isPresent()) {
+            // FK is found in the database, update if necessary.
+            DbFkInfo dbi = dbFkInfoOpt.get();
+            if (!dbi.reflects(fk)) {
+                dbAdaptor.dropFK(conn, g.getName(), dbi.getTableName(), dbi.getName());
+                dbAdaptor.createFK(conn, fk);
+            }
+        } else {
+            // FK is not detected in the database, creation from scratch
+            dbAdaptor.createFK(conn, fk);
+        }
     }
 
     void updateGrainFKeys(Grain g) {
@@ -416,7 +483,7 @@ public abstract class DbUpdater<T extends ICallContext> {
                 }
     }
 
-    List<DbFkInfo> dropOrphanedGrainFKeys(Grain g) {
+    List<DbFkInfo> dropOrphanedGrainForeignKeysAndGetActual(Grain g) {
         Connection conn = schemaCursor.callContext().getConn();
         List<DbFkInfo> dbFKeys = dbAdaptor.getFKInfo(conn, g);
         Map<String, ForeignKey> fKeys = new HashMap<>();
@@ -470,6 +537,24 @@ public abstract class DbUpdater<T extends ICallContext> {
                     }
                 }
             }
+        }
+    }
+
+    void updateIndex(Index index, Map<String, DbIndexInfo> dbIndices) {
+        final Connection conn = schemaCursor.callContext().getConn();
+
+        DbIndexInfo dBIndexInfo = dbIndices.get(index.getName());
+        if (dBIndexInfo != null) {
+            // The database contains an index with this name,
+            // it is necessary to check fields and re-create the index if necessary.
+            boolean reflects = dBIndexInfo.reflects(index);
+            if (!reflects) {
+                dbAdaptor.dropIndex(index.getGrain(), dBIndexInfo);
+                dbAdaptor.createIndex(conn, index);
+            }
+        } else {
+            // TCreating an index that did not exist before.
+            dbAdaptor.createIndex(conn, index);
         }
     }
 

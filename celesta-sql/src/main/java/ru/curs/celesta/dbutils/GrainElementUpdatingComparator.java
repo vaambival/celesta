@@ -1,9 +1,6 @@
 package ru.curs.celesta.dbutils;
 
-import ru.curs.celesta.score.AbstractScore;
-import ru.curs.celesta.score.Grain;
-import ru.curs.celesta.score.GrainElement;
-import ru.curs.celesta.score.GrainElementReference;
+import ru.curs.celesta.score.*;
 
 import java.util.Comparator;
 
@@ -19,15 +16,36 @@ public class GrainElementUpdatingComparator implements Comparator<GrainElement> 
     @Override
     public int compare(GrainElement o1, GrainElement o2) {
 
-        if (firstDependsOnSecond(o1, o2)) {
-            return 1;
-        } else if (firstDependsOnSecond(o2, o1)) {
+        if (this.firstIsSequenceAndSecondIsNot(o1, o2)) {
+            // TODO: Temporary if-else-if. Will be removed with injection of sequences as references (need issue)
             return -1;
+        } else if (this.firstIsSequenceAndSecondIsNot(o2, o1)) {
+            return 1;
+        }
+
+        if (this.firstIsTableAndSecondIsNot(o1, o2)) {
+            // TODO: Temporary if-else-if. Will be removed with injection of tables as references (need issue)
+            return -1;
+        } else if (this.firstIsTableAndSecondIsNot(o2, o1)) {
+            return 1;
+        }
+
+
+        if (this.firstDependsOnSecond(o1, o2)) {
+            return 1;
+        } else if (this.firstDependsOnSecond(o2, o1)) {
+            return -1;
+        }
+
+        if (this.firstIsIndexAndSecondIsNot(o1, o2)) {
+            // TODO: Temporary if-else-if. Will be removed with injection of tables as references (need issue)
+            return -1;
+        } else if (this.firstIsIndexAndSecondIsNot(o2, o1)) {
+            return 1;
         }
 
         return 0;
     }
-
 
     private boolean firstDependsOnSecond(GrainElement first, GrainElement second) {
 
@@ -42,4 +60,17 @@ public class GrainElementUpdatingComparator implements Comparator<GrainElement> 
 
         return false;
     }
+
+    private boolean firstIsSequenceAndSecondIsNot(GrainElement first, GrainElement second) {
+        return first instanceof SequenceElement && !(second instanceof SequenceElement);
+    }
+
+    private boolean firstIsTableAndSecondIsNot(GrainElement first, GrainElement second) {
+        return first instanceof Table && !(second instanceof Table);
+    }
+
+    private boolean firstIsIndexAndSecondIsNot(GrainElement first, GrainElement second) {
+        return first instanceof Index && !(second instanceof Index);
+    }
+
 }
