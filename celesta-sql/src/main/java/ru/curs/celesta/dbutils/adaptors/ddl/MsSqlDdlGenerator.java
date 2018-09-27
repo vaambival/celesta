@@ -356,40 +356,32 @@ public class MsSqlDdlGenerator extends DdlGenerator {
     }
 
     @Override
-    public List<String> dropTableTriggersForMaterializedViews(Connection conn, Table t)  {
+    public List<String> dropTableTriggerForMaterializedView(Connection conn, MaterializedView mv) {
         List<String> result = new ArrayList<>();
+        Table t = mv.getRefTable().getTable();
 
-        List<MaterializedView> mvList = t.getGrain().getElements(MaterializedView.class).values().stream()
-                .filter(mv -> mv.getRefTable().getTable().equals(t))
-                .collect(Collectors.toList());
+        String insertTriggerName = mv.getTriggerName(TriggerType.POST_INSERT);
+        String deleteTriggerName = mv.getTriggerName(TriggerType.POST_DELETE);
 
         TriggerQuery query = new TriggerQuery()
                 .withSchema(t.getGrain().getName())
                 .withTableName(t.getName());
 
-        for (MaterializedView mv : mvList) {
+        query.withName(insertTriggerName);
+        if (this.triggerExists(conn, query))
+            result.add(dropTrigger(query));
+        query.withName(deleteTriggerName);
+        if (this.triggerExists(conn, query))
+            result.add(dropTrigger(query));
 
-            String insertTriggerName = mv.getTriggerName(TriggerType.POST_INSERT);
-            String deleteTriggerName = mv.getTriggerName(TriggerType.POST_DELETE);
 
-
-            query.withName(insertTriggerName);
-            if (this.triggerExists(conn, query))
-                result.add(dropTrigger(query));
-            query.withName(deleteTriggerName);
-            if (this.triggerExists(conn, query))
-                result.add(dropTrigger(query));
-        }
-
-        if (!mvList.isEmpty()) {
-            //Обнуляем избыточный rec_version триггер.
-            query.withName(t.getName() + "_upd");
-            if (this.triggerExists(conn, query))
-                result.add(dropTrigger(query));
-            if (t.isVersioned()) {
-                result.add(createVersioningTrigger(t));
-                this.rememberTrigger(query);
-            }
+        // Reset the redundant rec_version trigger.
+        query.withName(t.getName() + "_upd");
+        if (this.triggerExists(conn, query))
+            result.add(dropTrigger(query));
+        if (t.isVersioned()) {
+            result.add(createVersioningTrigger(t));
+            this.rememberTrigger(query);
         }
 
         return result;
@@ -584,6 +576,15 @@ public class MsSqlDdlGenerator extends DdlGenerator {
 
         result.add(sb.toString());
         this.rememberTrigger(query.withName(updateTriggerName));
+
+        return result;
+    }
+
+    @Override
+    public List<String> createTableTriggerForMaterializedView(MaterializedView mv) {
+        List<String> result = new ArrayList<>();
+        Table t = mv.getRefTable().getTable();
+        String fullTableName = tableString(t.getGrain().getName(), t.getName());
 
         return result;
     }

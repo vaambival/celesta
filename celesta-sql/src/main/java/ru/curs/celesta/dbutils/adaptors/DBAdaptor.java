@@ -457,8 +457,8 @@ public abstract class DBAdaptor implements QueryBuildingHelper, StaticDataAdapto
         this.ddlAdaptor.createParameterizedView(conn, pv);
     }
 
-    public final void dropTableTriggersForMaterializedViews(Connection conn, Table t) {
-        this.ddlAdaptor.dropTableTriggersForMaterializedViews(conn, t);
+    public final void dropTableTriggerForMaterializedView(Connection conn, MaterializedView mv) {
+        this.ddlAdaptor.dropTableTriggerForMaterializedView(conn, mv);
     }
 
     public final void createTableTriggersForMaterializedViews(Connection conn, Table t) {

@@ -440,11 +440,14 @@ public abstract class DdlGenerator {
 
     abstract List<String> createParameterizedView(ParameterizedView pv) ;
 
-    abstract Optional<String> dropAutoIncrement(Connection conn, TableElement t) ;
+    abstract Optional<String> dropAutoIncrement(Connection conn, TableElement t);
 
-    public abstract List<String> dropTableTriggersForMaterializedViews(Connection conn, Table t) ;
+    public abstract List<String> dropTableTriggerForMaterializedView(Connection conn, MaterializedView mv) ;
 
+    @Deprecated
     public abstract List<String> createTableTriggersForMaterializedViews(Table t);
+
+    public abstract List<String> createTableTriggerForMaterializedView(MaterializedView mv);
 
     /**
      * Возвращает sql с функцией округления timestamp до даты.

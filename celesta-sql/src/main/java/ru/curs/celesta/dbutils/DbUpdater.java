@@ -375,6 +375,18 @@ public abstract class DbUpdater<T extends ICallContext> {
                 Map<String, DbIndexInfo> dbIndices = dbAdaptor.getIndices(conn, g);
                 final Index index = (Index) ge;
                 updateIndex(index, dbIndices);
+            } else if (ge instanceof View) {
+                View view = (View)ge;
+                this.dbAdaptor.createView(conn, view);
+            } else if (ge instanceof ParameterizedView) {
+                ParameterizedView parameterizedView = (ParameterizedView)ge;
+                dbAdaptor.createParameterizedView(conn, parameterizedView);
+            } else if (ge instanceof MaterializedView) {
+                MaterializedView materializedView = (MaterializedView)ge;
+                Table table = materializedView.getRefTable().getTable();
+                updateMaterializedView(materializedView, modifiedTablesSet.contains(table));
+                dbAdaptor.dropTableTriggerForMaterializedView(conn, materializedView);
+                dbAdaptor.createTableTriggersForMaterializedViews(conn, t);
             }
 
             // TODO: Modify db metadata

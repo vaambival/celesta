@@ -295,8 +295,8 @@ public final class DdlAdaptor {
     }
 
     //TODO: Javadoc
-    public void dropTableTriggersForMaterializedViews(Connection conn, Table t)  {
-        List<String> sqlList = this.ddlGenerator.dropTableTriggersForMaterializedViews(conn, t);
+    public void dropTableTriggerForMaterializedView(Connection conn, MaterializedView mv)  {
+        List<String> sqlList = this.ddlGenerator.dropTableTriggerForMaterializedView(conn, mv);
         try {
             processSql(conn, sqlList);
         } catch (CelestaException e) {
