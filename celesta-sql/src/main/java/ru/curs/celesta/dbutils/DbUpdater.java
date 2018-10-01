@@ -8,6 +8,7 @@ import ru.curs.celesta.dbutils.meta.*;
 import ru.curs.celesta.event.TriggerQuery;
 import ru.curs.celesta.event.TriggerType;
 import ru.curs.celesta.score.*;
+import ru.curs.celesta.syscursors.ISchemaElementCursor;
 import ru.curs.celesta.syscursors.ISchemaCursor;
 
 import java.sql.Connection;
@@ -33,6 +34,7 @@ public abstract class DbUpdater<T extends ICallContext> {
     private final boolean forceDdInitialize;
     protected final ConnectionPool connectionPool;
     protected ISchemaCursor schemaCursor;
+    protected ISchemaElementCursor grainElementCursor;
 
     public DbUpdater(ConnectionPool connectionPool, AbstractScore score, boolean forceDdInitialize, DBAdaptor dbAdaptor) {
         this.connectionPool = connectionPool;
@@ -117,6 +119,8 @@ public abstract class DbUpdater<T extends ICallContext> {
 
             final Set<GrainElement> grainElementsToUpdateSet = new HashSet<>();
             final Map<Grain, List<DbFkInfo>> grainToDbFkInfoList = new HashMap<>();
+            final Map<Grain, Collection<? extends GrainElement>> notProcessedElements = new HashMap<>();
+            final Set<Table> modifiedTables = new HashSet<>();
 
             for (Grain g : grains) {
                 GrainInfo gi = dbGrains.get(g.getName());
@@ -155,24 +159,56 @@ public abstract class DbUpdater<T extends ICallContext> {
                 grainToDbFkInfoList.put(g, dropOrphanedGrainForeignKeysAndGetActual(g));
 
 
-                grainElementsToUpdateSet.addAll(g.getElements(SequenceElement.class).values());
-                grainElementsToUpdateSet.addAll(g.getElements(Table.class).values());
-                grainElementsToUpdateSet.addAll(g.getIndices().values());
-                grainElementsToUpdateSet.addAll(g.getElements(View.class).values());
-                grainElementsToUpdateSet.addAll(g.getElements(ParameterizedView.class).values());
-                grainElementsToUpdateSet.addAll(g.getElements(MaterializedView.class).values());
+                Collection<SequenceElement> sequenceElements = g.getElements(SequenceElement.class).values();
+                Collection<Table> tables = g.getElements(Table.class).values();
+                Collection<Index> indices = g.getElements(Index.class).values();
+                Collection<View> views = g.getElements(View.class).values();
+                Collection<ParameterizedView> parameterizedViews = g.getElements(ParameterizedView.class).values();
+                Collection<MaterializedView> materializedViews = g.getElements(MaterializedView.class).values();
 
-                //TODO: дробим все на списки элементов и обновляем их в логичном порядке
+                grainElementsToUpdateSet.addAll(sequenceElements);
+                grainElementsToUpdateSet.addAll(tables);
+                grainElementsToUpdateSet.addAll(indices);
+                grainElementsToUpdateSet.addAll(views);
+                grainElementsToUpdateSet.addAll(parameterizedViews);
+                grainElementsToUpdateSet.addAll(materializedViews);
+
+                Set<GrainElement> allGrainElements = new HashSet<>();
+                allGrainElements.addAll(sequenceElements);
+                allGrainElements.addAll(tables);
+                allGrainElements.addAll(indices);
+                allGrainElements.addAll(views);
+                allGrainElements.addAll(parameterizedViews);
+                allGrainElements.addAll(materializedViews);
+
+
+                notProcessedElements.put(g, allGrainElements);
             }
 
             GrainElementUpdatingComparator comparator = new GrainElementUpdatingComparator(this.score);
             final List<GrainElement> grainElementsToUpdate = new ArrayList<>(grainElementsToUpdateSet);
             grainElementsToUpdate.sort(comparator);
 
-            // TODO: Сначала нужно обновить последовательности, потом таблицы, потом индексы, потом внешние ключи,
-            //       а потом остальное
             for (GrainElement ge : grainElementsToUpdate) {
-                success =  updateGrainElement(ge, ) && success;
+                Grain g = ge.getGrain();
+
+                success =  updateGrainElement(ge, grainToDbFkInfoList, modifiedTables) && success;
+
+                if (notProcessedElements.get(g).isEmpty()) {
+                    processGrainMeta(g);
+
+                    afterGrainUpdating(g);
+                    // По завершении -- обновление номера версии, контрольной суммы
+                    // и выставление в статус ready
+                    schemaCursor.setState(ISchemaCursor.READY);
+                    schemaCursor.setChecksum(String.format("%08X", g.getChecksum()));
+                    schemaCursor.setLength(g.getLength());
+                    schemaCursor.setLastmodified(new Date());
+                    schemaCursor.setMessage("");
+                    schemaCursor.setVersion(g.getVersion().toString());
+                    schemaCursor.update();
+                    connectionPool.commit(schemaCursor.callContext().getConn());
+                }
             }
 
             if (!success) {
@@ -348,9 +384,17 @@ public abstract class DbUpdater<T extends ICallContext> {
     }
 
     private boolean updateGrainElement(GrainElement ge, Map<Grain, List<DbFkInfo>> dbFKeysMap, Set<Table> modifiedTablesSet) {
-        // TODO: Modify db metadata
+
+        Grain g = ge.getGrain();
+
+        // TODO: Создать или обновить
+        // выставление в статус updating
+        grainElementCursor.get(ge.getName(), g.getName());
+        grainElementCursor.setState(ISchemaElementCursor.UPGRADING);
+        grainElementCursor.update();
+        connectionPool.commit(schemaCursor.callContext().getConn());
+
         try {
-            Grain g = ge.getGrain();
             final Connection conn = schemaCursor.callContext().getConn();
             // TODO: We need to create separated elementUpgrader
             if (ge instanceof SequenceElement) {
@@ -375,24 +419,37 @@ public abstract class DbUpdater<T extends ICallContext> {
                 Map<String, DbIndexInfo> dbIndices = dbAdaptor.getIndices(conn, g);
                 final Index index = (Index) ge;
                 updateIndex(index, dbIndices);
+            } else if (ge instanceof ParameterizedView) {
+                ParameterizedView parameterizedView = (ParameterizedView)ge;
+                this.dbAdaptor.createParameterizedView(conn, parameterizedView);
             } else if (ge instanceof View) {
                 View view = (View)ge;
                 this.dbAdaptor.createView(conn, view);
-            } else if (ge instanceof ParameterizedView) {
-                ParameterizedView parameterizedView = (ParameterizedView)ge;
-                dbAdaptor.createParameterizedView(conn, parameterizedView);
             } else if (ge instanceof MaterializedView) {
                 MaterializedView materializedView = (MaterializedView)ge;
                 Table table = materializedView.getRefTable().getTable();
                 updateMaterializedView(materializedView, modifiedTablesSet.contains(table));
-                dbAdaptor.dropTableTriggerForMaterializedView(conn, materializedView);
-                dbAdaptor.createTableTriggersForMaterializedViews(conn, t);
+                this.dbAdaptor.dropTableTriggerForMaterializedView(conn, materializedView);
+                this.dbAdaptor.createTableTriggerForMaterializedView(conn, materializedView);
             }
 
             // TODO: Modify db metadata
             return true;
         } catch (Exception e) {
-            // TODO: Modify db metadata
+            String newMsg = "";
+            try {
+                grainElementCursor.callContext().getConn().rollback();
+            } catch (SQLException e1) {
+                newMsg = ", " + e1.getMessage();
+            }
+            // Если что-то пошло не так
+            grainElementCursor.setState(ISchemaElementCursor.ERROR);
+            grainElementCursor.setMessage(String.format(
+                    "%s/%d/%08X: %s",
+                    g.getVersion().toString(), g.getLength(), g.getChecksum(), e.getMessage() + newMsg)
+            );
+            grainElementCursor.update();
+            connectionPool.commit(grainElementCursor.callContext().getConn());
             return false;
         }
     }

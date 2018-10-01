@@ -444,9 +444,6 @@ public abstract class DdlGenerator {
 
     public abstract List<String> dropTableTriggerForMaterializedView(Connection conn, MaterializedView mv) ;
 
-    @Deprecated
-    public abstract List<String> createTableTriggersForMaterializedViews(Table t);
-
     public abstract List<String> createTableTriggerForMaterializedView(MaterializedView mv);
 
     /**

@@ -4,7 +4,7 @@ import ru.curs.celesta.ICallContext;
 
 import java.util.Date;
 
-public interface GrainElementCursor {
+public interface ISchemaElementCursor {
 
     /**
      * Статус "готов".

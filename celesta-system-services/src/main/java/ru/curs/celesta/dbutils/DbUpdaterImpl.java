@@ -33,6 +33,7 @@ public final class DbUpdaterImpl extends DbUpdater<CallContext> {
   @Override
   protected void initDataAccessors(CallContext context) {
     schemaCursor = new GrainsCursor(context);
+    grainElementCursor =
     table = new TablesCursor(context);
   }
 
